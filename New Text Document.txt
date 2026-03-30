@@ -1,0 +1,123 @@
+/**************************************************************************
+Project: Educational Attainment and Self-Rated General Health
+Data: 2022 National Health Interview Survey (NHIS)
+Author: Hasti Mekanik
+Description:
+This program prepares an analytic dataset and fits a proportional odds
+ordinal logistic regression model to examine the association between
+educational attainment and self-rated health among U.S. adults.
+
+Methods:
+- Outcome: 4-level ordinal self-rated health (higher = worse health)
+- Predictor: Educational attainment (4 levels)
+- Covariates: Age, sex, work income
+- Approach: Complete-case analysis
+**************************************************************************/
+
+/* Assign library location (update path if needed) */
+libname mydata "/home/u64010187";
+
+/**************************************************************************
+Step 1: Create analytic dataset
+**************************************************************************/
+data nhis_final;
+    set mydata.nhis2022_cat_class;
+
+    /* Restrict to adults age 18–75 */
+    if AGEP_A < 18 then delete;
+    if AGEP_A > 75 then delete;
+
+    /* Recode self-rated health (PHSTAT_A) into 4-level ordinal variable
+       1 = Excellent
+       2 = Very Good
+       3 = Good
+       4 = Fair/Poor
+       Higher values indicate worse health */
+    if PHSTAT_A = 1 then SRH4 = 1;
+    else if PHSTAT_A = 2 then SRH4 = 2;
+    else if PHSTAT_A = 3 then SRH4 = 3;
+    else if PHSTAT_A in (4,5) then SRH4 = 4;
+    else SRH4 = .;
+
+    /* Recode education (EDUCP_A) into 4 ordered categories
+       1 = Less than high school
+       2 = High school/GED
+       3 = Some college/associate degree
+       4 = Bachelor's degree or higher */
+    if EDUCP_A in (1,2,3,4) then EDUC4 = EDUCP_A;
+    else EDUC4 = .;
+
+    /* Recode sex
+       0 = Male
+       1 = Female */
+    if SEX_A = 1 then SEX_BIN = 0;
+    else if SEX_A = 2 then SEX_BIN = 1;
+    else SEX_BIN = .;
+
+    /* Work income indicator
+       1 = Has work income
+       0 = No work income */
+    if INCWRKO_A = 1 then WORK_INC = 1;
+    else if INCWRKO_A = 2 then WORK_INC = 0;
+    else WORK_INC = .;
+
+    /* Continuous age variable */
+    AGE_YRS = AGEP_A;
+
+    /* Complete-case analysis: remove missing values */
+    if nmiss(SRH4, EDUC4, AGE_YRS, SEX_BIN, WORK_INC) > 0 then delete;
+
+    /* Add labels for clarity */
+    label
+        SRH4     = "Self-rated health (4-level ordinal)"
+        EDUC4    = "Educational attainment"
+        SEX_BIN  = "Sex (0=Male, 1=Female)"
+        WORK_INC = "Work income (1=Yes, 0=No)"
+        AGE_YRS  = "Age in years";
+run;
+
+/**************************************************************************
+Step 2: Descriptive checks
+**************************************************************************/
+proc freq data=nhis_final;
+    tables SRH4 EDUC4 SEX_BIN WORK_INC / missing;
+run;
+
+proc means data=nhis_final n mean std min max;
+    var AGE_YRS;
+run;
+
+/**************************************************************************
+Step 3: Proportional Odds Ordinal Logistic Regression
+**************************************************************************/
+proc logistic data=nhis_final;
+
+    class EDUC4 (ref='1')
+          SEX_BIN (ref='0')
+          WORK_INC (ref='1')
+          / param=ref;
+
+    model SRH4(order=internal) =
+          EDUC4
+          AGE_YRS
+          SEX_BIN
+          WORK_INC
+          / link=logit
+            clodds=wald;
+
+    /* Odds ratios for interpretation */
+    oddsratio EDUC4;
+    oddsratio AGE_YRS;
+    oddsratio SEX_BIN;
+    oddsratio WORK_INC;
+
+    /* Output selected results */
+    ods select ResponseProfile
+               ClassLevelInfo
+               ModelInfo
+               FitStatistics
+               ScoreTest
+               Type3
+               ParameterEstimates
+               OddsRatios;
+run;
